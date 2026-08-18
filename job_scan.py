@@ -51,8 +51,13 @@ If nothing new, return []."""
         data=body,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")
+        print(f"Gemini API error {e.code}: {err_body}", file=sys.stderr)
+        raise
 
     candidates = data.get("candidates", [])
     if not candidates:
