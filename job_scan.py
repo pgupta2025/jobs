@@ -8,7 +8,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 STATE_FILE = "state.json"
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.6-flash"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 PROFILE_ROLE = "ETL / QA Test Specialist"
