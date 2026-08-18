@@ -4,9 +4,12 @@ import re
 import sys
 import urllib.request
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 STATE_FILE = "state.json"
+
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 PROFILE_ROLE = "ETL / QA Test Specialist"
 PROFILE_YEARS = "9 years experience"
@@ -29,35 +32,36 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def call_claude(seen_links):
+def call_gemini(seen_links):
     prompt = f"""Search the web right now for current, open job postings in {PROFILE_LOCATION} for a {PROFILE_ROLE} with {PROFILE_YEARS}.
 Skills to match against: {', '.join(PROFILE_SKILLS)}.
 Search across LinkedIn Jobs, Naukri, Indeed India, Foundit (Monster India), Instahyre, and Cutshort. Look for titles like "ETL Tester", "QA Engineer - Data", "Data Warehouse Tester", "Test Analyst - ETL", "Data Quality Analyst", "SDET - Data".
 Skip any of these already-seen links: {', '.join(seen_links[-200:]) if seen_links else '(none yet)'}.
-Return ONLY a raw JSON array (no markdown fences, no prose) of up to 12 objects shaped exactly like:
+Return ONLY a raw JSON array (no markdown fences, no prose, no commentary before or after) of up to 12 objects shaped exactly like:
 {{"title": "...", "company": "...", "platform": "LinkedIn|Naukri|Indeed|Foundit|Instahyre|Cutshort|Other", "location": "...", "link": "https://...", "why": "one short sentence on why it matches"}}
 If nothing new, return []."""
 
     body = json.dumps({
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 1200,
-        "messages": [{"role": "user", "content": prompt}],
-        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "contents": [{"parts": [{"text": prompt}]}],
+        "tools": [{"google_search": {}}],
     }).encode()
 
     req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+        f"{GEMINI_URL}?key={GEMINI_API_KEY}",
         data=body,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-        },
+        headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read())
 
-    text = "\n".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
+    candidates = data.get("candidates", [])
+    if not candidates:
+        print("No candidates in Gemini response:", json.dumps(data)[:500], file=sys.stderr)
+        return []
+
+    parts = candidates[0].get("content", {}).get("parts", [])
+    text = "\n".join(p.get("text", "") for p in parts)
+
     match = re.search(r"\[[\s\S]*\]", text)
     return json.loads(match.group(0)) if match else []
 
@@ -89,7 +93,7 @@ def main():
     state = load_state()
     seen = set(state.get("seen_links", []))
 
-    jobs = call_claude(list(seen))
+    jobs = call_gemini(list(seen))
     new_jobs = [j for j in jobs if j.get("link") and j["link"] not in seen]
 
     for job in new_jobs:
