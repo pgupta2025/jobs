@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import urllib.request
+import urllib.error
 
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 NTFY_TOPIC = os.environ["NTFY_TOPIC"]
@@ -11,13 +12,12 @@ STATE_FILE = "state.json"
 GEMINI_MODEL = "gemini-3.6-flash"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
-PROFILE_ROLE = "ETL / QA Test Specialist"
-PROFILE_YEARS = "9 years experience"
+PROFILE_ROLE = "ETL/QA Test Specialist"
+PROFILE_YEARS = "9 yrs"
 PROFILE_LOCATION = "India"
-PROFILE_SKILLS = [
-    "SQL", "PL/SQL", "AWS (S3, Glue, Athena)", "Snowflake", "PySpark",
-    "Apache Airflow", "Power BI", "Data Warehousing", "JIRA", "STLC",
-]
+PROFILE_SKILLS = "SQL, PL/SQL, AWS(S3/Glue/Athena), Snowflake, PySpark, Airflow, Power BI, DWH, JIRA, STLC"
+TITLES = "ETL Tester, QA Engineer-Data, DW Tester, Test Analyst-ETL, Data Quality Analyst, SDET-Data"
+SITES = "LinkedIn, Naukri, Indeed India, Foundit, Instahyre, Cutshort"
 
 
 def load_state():
@@ -33,17 +33,21 @@ def save_state(state):
 
 
 def call_gemini(seen_links):
-    prompt = f"""Search the web right now for current, open job postings in {PROFILE_LOCATION} for a {PROFILE_ROLE} with {PROFILE_YEARS}.
-Skills to match against: {', '.join(PROFILE_SKILLS)}.
-Search across LinkedIn Jobs, Naukri, Indeed India, Foundit (Monster India), Instahyre, and Cutshort. Look for titles like "ETL Tester", "QA Engineer - Data", "Data Warehouse Tester", "Test Analyst - ETL", "Data Quality Analyst", "SDET - Data".
-Skip any of these already-seen links: {', '.join(seen_links[-200:]) if seen_links else '(none yet)'}.
-Return ONLY a raw JSON array (no markdown fences, no prose, no commentary before or after) of up to 12 objects shaped exactly like:
-{{"title": "...", "company": "...", "platform": "LinkedIn|Naukri|Indeed|Foundit|Instahyre|Cutshort|Other", "location": "...", "link": "https://...", "why": "one short sentence on why it matches"}}
-If nothing new, return []."""
+    # Kept short deliberately -- fewer input/output tokens per call.
+    skip = ", ".join(seen_links[-100:]) if seen_links else "none"
+    prompt = (
+        f"Find open jobs in {PROFILE_LOCATION}: {PROFILE_ROLE}, {PROFILE_YEARS}. "
+        f"Skills: {PROFILE_SKILLS}. Titles like: {TITLES}. "
+        f"Sites: {SITES}. Skip links: {skip}. "
+        'Output ONLY a JSON array, max 10 items, no prose: '
+        '[{"title":"","company":"","platform":"","location":"","link":"","why":""}] '
+        '"why" max 12 words. Empty array if nothing new.'
+    )
 
     body = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
         "tools": [{"google_search": {}}],
+        "generationConfig": {"maxOutputTokens": 800},
     }).encode()
 
     req = urllib.request.Request(
