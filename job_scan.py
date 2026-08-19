@@ -64,7 +64,12 @@ def call_claude(seen_links):
         print(f"Claude API error {e.code}: {err_body}", file=sys.stderr)
         raise
 
+    block_types = [b.get("type") for b in data.get("content", [])]
+    print(f"Response block types: {block_types}", file=sys.stderr)
+    print(f"Stop reason: {data.get('stop_reason')}", file=sys.stderr)
+
     text = "\n".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
+    print(f"--- Raw Claude text (first 500 chars) ---\n{text[:500]}\n--- end ---", file=sys.stderr)
     match = re.search(r"\[[\s\S]*\]", text)
     return json.loads(match.group(0)) if match else []
 
@@ -97,6 +102,25 @@ def notify(job):
     urllib.request.urlopen(req, timeout=30)
 
 
+def notify_no_jobs(total_found):
+    message = (
+        f"Scanned platforms — {total_found} job(s) seen, all already notified."
+        if total_found
+        else "Scanned platforms — no matching jobs found this run."
+    )
+    req = urllib.request.Request(
+        f"https://ntfy.sh/{NTFY_TOPIC}",
+        data=message.encode("utf-8"),
+        headers={
+            "Title": "Job scan complete",
+            "Priority": "low",
+            "Tags": "mag",
+        },
+        method="POST",
+    )
+    urllib.request.urlopen(req, timeout=30)
+
+
 def main():
     state = load_state()
     seen = set(state.get("seen_links", []))
@@ -112,6 +136,12 @@ def main():
             seen.add(job["link"])
         except Exception as e:
             print(f"Failed to notify for {job.get('link')}: {e}", file=sys.stderr)
+
+    if not new_jobs:
+        try:
+            notify_no_jobs(len(jobs))
+        except Exception as e:
+            print(f"Failed to send no-jobs notification: {e}", file=sys.stderr)
 
     state["seen_links"] = list(seen)[-500:]  # cap growth
     save_state(state)
