@@ -104,6 +104,8 @@ def main():
     jobs = call_claude(list(seen))
     new_jobs = [j for j in jobs if j.get("link") and j["link"] not in seen]
 
+    print(f"Claude returned {len(jobs)} job(s) total, {len(new_jobs)} not already seen.")
+
     for job in new_jobs:
         try:
             notify(job)
