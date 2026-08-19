@@ -16,6 +16,18 @@ PROFILE_SKILLS = "SQL, PL/SQL, AWS(S3/Glue/Athena), Snowflake, PySpark, Airflow,
 TITLES = "ETL Tester, QA Engineer-Data, DW Tester, Test Analyst-ETL, Data Quality Analyst, SDET-Data"
 SITES = "LinkedIn, Naukri, Indeed India, Foundit, Instahyre, Cutshort"
 
+# Guaranteed-valid fallback search links per platform, used when Claude can't
+# surface a specific posting URL (common -- LinkedIn/Naukri mostly index
+# aggregate listing pages, not individual postings, for outside search).
+FALLBACK_LINKS = {
+    "LinkedIn": "https://www.linkedin.com/jobs/search/?keywords=ETL%20Tester&location=India",
+    "Naukri": "https://www.naukri.com/etl-tester-jobs-in-india",
+    "Indeed": "https://in.indeed.com/jobs?q=ETL+Tester&l=India",
+    "Foundit": "https://www.foundit.in/srp/results?query=ETL%20Tester&locations=India",
+    "Instahyre": "https://www.instahyre.com/search-jobs/?q=ETL%20Tester",
+    "Cutshort": "https://cutshort.io/jobs?q=ETL%20Tester",
+}
+
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -29,15 +41,19 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def call_claude(seen_links):
-    skip = ", ".join(seen_links[-100:]) if seen_links else "none"
+def call_claude(seen_keys):
+    skip = ", ".join(seen_keys[-100:]) if seen_keys else "none"
     prompt = (
         f"Find open jobs in {PROFILE_LOCATION}: {PROFILE_ROLE}, {PROFILE_YEARS}. "
         f"Skills: {PROFILE_SKILLS}. Titles like: {TITLES}. "
-        f"Sites: {SITES}. Skip links: {skip}. "
+        f"Search each site: {SITES}. Use site-specific queries (e.g. site:naukri.com) "
+        f"to try to find individual posting pages, not just category/listing pages. "
+        f"Skip already-notified (title@company): {skip}. "
         'Output ONLY a JSON array, max 10 items, no prose: '
         '[{"title":"","company":"","platform":"","location":"","link":"","why":""}] '
-        '"why" max 12 words. Empty array if nothing new.'
+        'If you find a specific posting URL use it; if you can only confirm a role type '
+        'exists via an aggregate/category page, still include the item and set "link" to '
+        'that category page URL. "why" max 12 words. Empty array only if truly nothing relevant.'
     )
 
     body = json.dumps({
@@ -123,19 +139,30 @@ def notify_no_jobs(total_found):
 
 def main():
     state = load_state()
-    seen = set(state.get("seen_links", []))
+    seen = set(state.get("seen_keys", state.get("seen_links", [])))  # migrate old state if present
 
     jobs = call_claude(list(seen))
-    new_jobs = [j for j in jobs if j.get("link") and j["link"] not in seen]
+    print(f"Response contains {len(jobs)} raw job(s) from Claude.")
 
-    print(f"Claude returned {len(jobs)} job(s) total, {len(new_jobs)} not already seen.")
+    new_jobs = []
+    for j in jobs:
+        if not j.get("title") or not j.get("company"):
+            continue
+        key = f"{j['title']} @ {j['company']}"
+        if key in seen:
+            continue
+        if not j.get("link"):
+            j["link"] = FALLBACK_LINKS.get(j.get("platform", ""), "")
+        new_jobs.append(j)
+
+    print(f"{len(new_jobs)} job(s) not already seen.")
 
     for job in new_jobs:
         try:
             notify(job)
-            seen.add(job["link"])
+            seen.add(f"{job['title']} @ {job['company']}")
         except Exception as e:
-            print(f"Failed to notify for {job.get('link')}: {e}", file=sys.stderr)
+            print(f"Failed to notify for {job.get('title')}: {e}", file=sys.stderr)
 
     if not new_jobs:
         try:
@@ -143,7 +170,8 @@ def main():
         except Exception as e:
             print(f"Failed to send no-jobs notification: {e}", file=sys.stderr)
 
-    state["seen_links"] = list(seen)[-500:]  # cap growth
+    state["seen_keys"] = list(seen)[-500:]  # cap growth
+    state.pop("seen_links", None)  # drop old key name
     save_state(state)
     print(f"Scan complete. {len(new_jobs)} new job(s) pushed.")
 
