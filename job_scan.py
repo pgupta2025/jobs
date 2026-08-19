@@ -11,7 +11,7 @@ STATE_FILE = "state.json"
 
 PROFILE_ROLE = "ETL/QA Test Specialist"
 PROFILE_YEARS = "9 yrs"
-PROFILE_LOCATION = "India"
+PROFILE_LOCATION = "Delhi NCR (Delhi, Gurugram, Noida, Faridabad, Ghaziabad)"
 PROFILE_SKILLS = "SQL, PL/SQL, AWS(S3/Glue/Athena), Snowflake, PySpark, Airflow, Power BI, DWH, JIRA, STLC"
 TITLES = "ETL Tester, QA Engineer-Data, DW Tester, Test Analyst-ETL, Data Quality Analyst, SDET-Data"
 SITES = "LinkedIn, Naukri, Indeed India, Foundit, Instahyre, Cutshort"
@@ -20,10 +20,10 @@ SITES = "LinkedIn, Naukri, Indeed India, Foundit, Instahyre, Cutshort"
 # surface a specific posting URL (common -- LinkedIn/Naukri mostly index
 # aggregate listing pages, not individual postings, for outside search).
 FALLBACK_LINKS = {
-    "LinkedIn": "https://www.linkedin.com/jobs/search/?keywords=ETL%20Tester&location=India",
-    "Naukri": "https://www.naukri.com/etl-tester-jobs-in-india",
-    "Indeed": "https://in.indeed.com/jobs?q=ETL+Tester&l=India",
-    "Foundit": "https://www.foundit.in/srp/results?query=ETL%20Tester&locations=India",
+    "LinkedIn": "https://www.linkedin.com/jobs/search/?keywords=ETL%20Tester&location=Delhi%20NCR",
+    "Naukri": "https://www.naukri.com/etl-tester-jobs-in-delhi-ncr",
+    "Indeed": "https://in.indeed.com/jobs?q=ETL+Tester&l=Delhi+NCR",
+    "Foundit": "https://www.foundit.in/srp/results?query=ETL%20Tester&locations=Delhi%20NCR",
     "Instahyre": "https://www.instahyre.com/search-jobs/?q=ETL%20Tester",
     "Cutshort": "https://cutshort.io/jobs?q=ETL%20Tester",
 }
@@ -48,9 +48,11 @@ def call_claude(seen_keys):
         f"Skills: {PROFILE_SKILLS}. Titles like: {TITLES}. "
         f"Search each site: {SITES}. Use site-specific queries (e.g. site:naukri.com) "
         f"to try to find individual posting pages, not just category/listing pages. "
+        f"Include both product-based and service-based/IT-consulting companies -- do not "
+        f"filter out service-based roles, just flag the company type. "
         f"Skip already-notified (title@company): {skip}. "
         'Output ONLY a JSON array, max 10 items, no prose: '
-        '[{"title":"","company":"","platform":"","location":"","link":"","why":""}] '
+        '[{"title":"","company":"","platform":"","location":"","link":"","company_type":"product|service|unknown","why":""}] '
         'If you find a specific posting URL use it; if you can only confirm a role type '
         'exists via an aggregate/category page, still include the item and set "link" to '
         'that category page URL. "why" max 12 words. Empty array only if truly nothing relevant.'
@@ -93,10 +95,12 @@ def call_claude(seen_keys):
 
 
 def notify(job):
+    tag = job.get("company_type", "unknown")
+    tag_label = {"product": "🏷 Product", "service": "Service", "unknown": ""}.get(tag, "")
     title = f"{job.get('title', 'New role')} @ {job.get('company', '')}"
     lines = [
         job.get("why", ""),
-        f"{job.get('platform', '')} · {job.get('location', '')}",
+        f"{job.get('platform', '')} · {job.get('location', '')}" + (f" · {tag_label}" if tag_label else ""),
     ]
     message = "\n".join(l for l in lines if l)
     link = job.get("link", "")
@@ -158,6 +162,9 @@ def main():
         new_jobs.append(j)
 
     print(f"{len(new_jobs)} job(s) not already seen.")
+
+    # Surface product-based companies first, without dropping service-based ones.
+    new_jobs.sort(key=lambda j: 0 if j.get("company_type") == "product" else 1)
 
     for job in new_jobs:
         try:
