@@ -41,10 +41,10 @@ def call_claude(seen_links):
     )
 
     body = json.dumps({
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 800,
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 600,
         "messages": [{"role": "user", "content": prompt}],
-        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
     }).encode()
 
     req = urllib.request.Request(
@@ -78,11 +78,16 @@ def notify(job):
     message = "\n".join(l for l in lines if l)
     link = job.get("link", "")
 
+    # ntfy title header must be ASCII-safe; percent-encode to survive
+    # special characters in job titles/company names (ntfy decodes this).
+    import urllib.parse
+    safe_title = urllib.parse.quote(title)
+
     req = urllib.request.Request(
         f"https://ntfy.sh/{NTFY_TOPIC}",
         data=message.encode("utf-8"),
         headers={
-            "Title": title.encode("utf-8"),
+            "Title": safe_title,
             "Click": link,
             "Priority": "default",
             "Tags": "briefcase",
