@@ -58,7 +58,7 @@ def call_claude(seen_keys):
 
     body = json.dumps({
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 600,
+        "max_tokens": 2000,
         "messages": [{"role": "user", "content": prompt}],
         "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
     }).encode()
@@ -86,6 +86,8 @@ def call_claude(seen_keys):
 
     text = "\n".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
     print(f"--- Raw Claude text (first 500 chars) ---\n{text[:500]}\n--- end ---", file=sys.stderr)
+    if data.get("stop_reason") == "max_tokens":
+        print("WARNING: response was cut off by max_tokens -- output may be incomplete/unparseable.", file=sys.stderr)
     match = re.search(r"\[[\s\S]*\]", text)
     return json.loads(match.group(0)) if match else []
 
