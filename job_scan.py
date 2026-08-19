@@ -5,12 +5,9 @@ import sys
 import urllib.request
 import urllib.error
 
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 STATE_FILE = "state.json"
-
-GEMINI_MODEL = "gemini-3.6-flash"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 PROFILE_ROLE = "ETL/QA Test Specialist"
 PROFILE_YEARS = "9 yrs"
@@ -32,8 +29,7 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def call_gemini(seen_links):
-    # Kept short deliberately -- fewer input/output tokens per call.
+def call_claude(seen_links):
     skip = ", ".join(seen_links[-100:]) if seen_links else "none"
     prompt = (
         f"Find open jobs in {PROFILE_LOCATION}: {PROFILE_ROLE}, {PROFILE_YEARS}. "
@@ -45,32 +41,30 @@ def call_gemini(seen_links):
     )
 
     body = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "tools": [{"google_search": {}}],
-        "generationConfig": {"maxOutputTokens": 800},
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 800,
+        "messages": [{"role": "user", "content": prompt}],
+        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
     }).encode()
 
     req = urllib.request.Request(
-        f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+        "https://api.anthropic.com/v1/messages",
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace")
-        print(f"Gemini API error {e.code}: {err_body}", file=sys.stderr)
+        print(f"Claude API error {e.code}: {err_body}", file=sys.stderr)
         raise
 
-    candidates = data.get("candidates", [])
-    if not candidates:
-        print("No candidates in Gemini response:", json.dumps(data)[:500], file=sys.stderr)
-        return []
-
-    parts = candidates[0].get("content", {}).get("parts", [])
-    text = "\n".join(p.get("text", "") for p in parts)
-
+    text = "\n".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
     match = re.search(r"\[[\s\S]*\]", text)
     return json.loads(match.group(0)) if match else []
 
@@ -102,7 +96,7 @@ def main():
     state = load_state()
     seen = set(state.get("seen_links", []))
 
-    jobs = call_gemini(list(seen))
+    jobs = call_claude(list(seen))
     new_jobs = [j for j in jobs if j.get("link") and j["link"] not in seen]
 
     for job in new_jobs:
