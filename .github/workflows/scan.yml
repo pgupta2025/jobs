@@ -30,5 +30,13 @@ jobs:
           git config user.name "job-scanner-bot"
           git config user.email "actions@github.com"
           git add state.json
-          git diff --cached --quiet || git commit -m "Update seen jobs [skip ci]"
-          git push
+          git diff --cached --quiet && exit 0
+          git commit -m "Update seen jobs [skip ci]"
+          for i in 1 2 3 4 5; do
+            git push && exit 0
+            echo "Push rejected, pulling latest and retrying ($i/5)..."
+            git pull --rebase origin main
+            sleep $((RANDOM % 4 + 1))
+          done
+          echo "Failed to push after retries" >&2
+          exit 1
